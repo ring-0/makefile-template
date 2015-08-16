@@ -1,0 +1,294 @@
+
+######################################## Helper functions to generate the rules
+# $(1):	obj
+# $(2):	cpp
+# $(3):	dep
+# $(4):	CXX Q flags
+# STEPS:
+# - try including the dep file
+# - dependency file
+# - compilation
+define compile_cpp_rule
+
+-include $(3)
+
+$(1):	$(2)
+	@echo DEP "    " $(3)
+	@$(CXX) $(DEPFLAGS) $(CXX_INCLUDES) -MT $(1) -MM $(2) -MF $(3)
+	@echo CC "     " $(2)
+	@$(CXX) $(4) $(CXXFLAGS) $(CXX_INCLUDES) -c $(2) -o $(1)
+
+endef
+
+
+# $(1):	project
+# $(2):	directory
+define create_object_rules
+	$(eval ALL_SOURCES := $(wildcard $(addprefix $(2)/,$(CXX_Q1_SOURCES) $(CXX_Q2_SOURCES) $(CXX_Q3_SOURCES))))
+	$(eval ALL_BUILD_DIRS := $(sort $(dir $(subst $(2)/,$(2)/$(BUILD)/, $(ALL_SOURCES)))))
+	$(eval CXX := $(if $(findstring yes,++),$(CXX),$(CC)))
+
+$(ALL_BUILD_DIRS):
+	@echo MKDIR "  " $$@
+	@mkdir -p $$@
+
+	$(eval DEPFLAGS += $(if $(STDFLAG),$(STDFLAG)$(LANGUAGE_STD)))
+	$(eval CXXFLAGS += $(if $(STDFLAG),$(STDFLAG)$(LANGUAGE_STD)))
+
+	$(eval CXX_Q1_SOURCES := $(subst $(2)/,,$(wildcard $(addprefix $(2)/,$(CXX_Q1_SOURCES)))))
+	$(eval CXX_Q2_SOURCES := $(subst $(2)/,,$(wildcard $(addprefix $(2)/,$(CXX_Q2_SOURCES)))))
+	$(eval CXX_Q3_SOURCES := $(subst $(2)/,,$(wildcard $(addprefix $(2)/,$(CXX_Q3_SOURCES)))))
+
+	$(eval CXX_Q1_SOURCES := $(filter-out $(CXX_Q2_SOURCES) $(CXX_Q3_SOURCES),$(CXX_Q1_SOURCES)))
+	$(eval CXX_Q2_SOURCES := $(filter-out $(CXX_Q1_SOURCES) $(CXX_Q3_SOURCES),$(CXX_Q2_SOURCES)))
+	$(eval CXX_Q3_SOURCES := $(filter-out $(CXX_Q1_SOURCES) $(CXX_Q2_SOURCES),$(CXX_Q3_SOURCES)))
+
+	$(eval CXX_INCLUDES_DEPENDENCIES := $(addprefix -i,$(subst /,-,$(DEPENDENCIES))))
+	$(eval CXX_INCLUDES_ABSOLUTE := $(filter-out .,$(wildcard $(EXTERNAL_INCLUDES))))
+	$(eval CXX_INCLUDES_RELATIVE := $(addprefix $(2)/,include $(filter-out $(CXX_INCLUDES_ABSOLUTE) .,$(EXTERNAL_INCLUDES)) $(filter .,$(EXTERNAL_INCLUDES))))
+	$(eval CXX_INCLUDES += $(addprefix -I,$(CXX_INCLUDES_ABSOLUTE) $(CXX_INCLUDES_RELATIVE)))
+
+	$(eval ALL_OBJS := )
+
+	$(foreach	src,				\
+				$(CXX_Q1_SOURCES),	\
+				$(eval obj := $(2)/$(BUILD)/$(addsuffix   .o,$(basename $(src))))
+				$(eval dep := $(2)/$(BUILD)/$(addsuffix .dep,$(basename $(src))))
+				$(eval cpp := $(2)/$(src))
+				$(eval ALL_OBJS += $(obj))
+				$(eval $(call compile_cpp_rule,$(obj),$(cpp),$(dep),$(CXX_Q1_FLAGS))))
+				
+	$(foreach	src,				\
+				$(CXX_Q2_SOURCES),	\
+				$(eval obj := $(2)/$(BUILD)/$(addsuffix   .o,$(basename $(src))))
+				$(eval dep := $(2)/$(BUILD)/$(addsuffix .dep,$(basename $(src))))
+				$(eval cpp := $(2)/$(src))
+				$(eval ALL_OBJS += $(obj))
+				$(eval $(call compile_cpp_rule,$(obj),$(cpp),$(dep),$(CXX_Q2_FLAGS))))
+
+	$(foreach	src,				\
+				$(CXX_Q3_SOURCES),	\
+				$(eval obj := $(2)/$(BUILD)/$(addsuffix   .o,$(basename $(src))))
+				$(eval dep := $(2)/$(BUILD)/$(addsuffix .dep,$(basename $(src))))
+				$(eval cpp := $(2)/$(src))
+				$(eval ALL_OBJS += $(obj))
+				$(eval $(call compile_cpp_rule,$(obj),$(cpp),$(dep),$(CXX_Q3_FLAGS))))
+
+$(ALL_OBJS): | $(ALL_BUILD_DIRS)
+
+
+ifneq ($(1),$(2))
+$(2): $(1)
+endif
+
+endef
+
+# $(1): src file
+# $(2): dst file
+define install_file_rule
+$(2):	$(1)
+	@echo "INSTALL " $(2)
+	@if [ -d $(1) ]; then test -d $(2) || mkdir $(2); else cp $(1) $(2); fi
+endef
+
+# $(1):	project
+# $(2):	directory
+# NOTE: absolute paths are used for the install dir skeleton to avoid cyclic directory dependencies
+define create_install_rules
+	$(eval INSTALL_FILES_EXPANDED := $(subst $(2)/,,$(wildcard $(addprefix $(2)/, $(INSTALL_FILES)))))
+	$(eval ALL_INSTALL_DIRS := $(addprefix $(SANDBOX)/$(INSTALL_DIR)/,$(sort $(dir $(INSTALL_FILES_EXPANDED)))))
+
+
+$(1)_install_dirs:
+	@for dir in $(ALL_INSTALL_DIRS); do \
+		test -d $$$$dir || (echo MKDIR "  " $$$$dir; mkdir -p $$$$dir); \
+	done; true
+
+
+	$(eval ALL_FILES := )
+	$(foreach	file,				\
+				$(INSTALL_FILES_EXPANDED),	\
+				$(eval src := $(2)/$(file))
+				$(eval dst := $(SANDBOX)/$(INSTALL_DIR)/$(file))
+				$(eval ALL_FILES += $(dst))
+				$(eval $(call install_file_rule,$(src),$(dst))))
+
+$(ALL_FILES): | $(1)_install_dirs
+
+$(1): $(ALL_FILES)
+
+ifneq ($(1),$(2))
+$(2): $(1)
+endif
+
+endef
+
+
+# $(1):	project
+# $(2):	directory
+define create_dep_libs
+	$(eval LOCAL_LIBS                 := $(addprefix -l,$(subst /,-,$(DEPENDENCIES))))
+	$(eval LOCAL_LIBS_ABSOLUTE        := $(wildcard $(addsuffix *,$(addprefix $(SANDBOX)/lib/lib, $(subst /,-,$(DEPENDENCIES))))))
+	$(eval EXTERNAL_LIBS              := $(addprefix -l, $(EXTERNAL_LIBS)))
+	$(eval RPATHS                     := $(addprefix $(LD_RPATH),$(EXTERNAL_LIBPATHS)))
+	$(eval EXTERNAL_LIBPATHS_ABSOLUTE := $(filter-out .,$(wildcard $(EXTERNAL_LIBPATHS))))
+	$(eval EXTERNAL_LIBPATHS_RELATIVE := $(addprefix $(2)/,$(filter-out $(EXTERNAL_LIBPATHS_ABSOLUTE) .,$(EXTERNAL_LIBPATHS)) $(filter .,$(EXTERNAL_LIBPATHS))))
+	$(eval EXTERNAL_LIBPATHS          := $(addprefix -L,$(EXTERNAL_LIBPATHS_ABSOLUTE) $(EXTERNAL_LIBPATHS_RELATIVE)))
+endef
+
+
+######################################## Project Templates
+
+# SHARED-LIBRARY
+# $(1): project
+# $(2): directory
+define shared-library_TEMPLATE
+	$(eval CXXFLAGS += -fPIC)
+	$(eval $(call create_object_rules,$(1),$(2)))
+	$(eval $(call create_dep_libs,$(1),$(2)))
+	$(eval SANDBOX_LIB := $(if $(LIBRARY_NAME), $(SANDBOX)/lib/$(LIBRARY_NAME), $(SANDBOX)/lib/lib$(1).so))
+
+
+$(SANDBOX_LIB):	$(ALL_OBJS) $(DEPENDENCIES) $(LOCAL_LIBS_ABSOLUTE)
+	@echo LD "     " $$@
+	@$(LD) -shared $(LDFLAGS) -o $$@ -L$(SANDBOX)/lib $(EXTERNAL_LIBPATHS) -Wl,-rpath=../lib $(RPATHS) $(ALL_OBJS) -Wl,--start-group $(LOCAL_LIBS) $(EXTERNAL_LIBS) -Wl,--end-group
+	@ln -sf $(abspath $(SANDBOX)/lib) $(2)/build/
+
+
+$(1): $(SANDBOX_LIB)
+
+$(1)_clean:
+	@test -d $(2)/$(BUILD) && rm -r $(2)/$(BUILD); true
+	@test -d $(2)/build && rmdir --ignore-fail-on-non-empty $(2)/build; true
+	@test -e $(SANDBOX_LIB) && rm $(SANDBOX_LIB); true
+	@test -d $(SANDBOX)/lib && rmdir --ignore-fail-on-non-empty $(SANDBOX)/lib; true
+
+endef
+
+
+# STATIC-LIBRARY
+# $(1): project
+# $(2): directory
+define static-library_TEMPLATE
+	$(eval CXXFLAGS += -fPIC)
+	$(eval $(call create_object_rules,$(1),$(2)))
+	$(eval SANDBOX_AR := $(SANDBOX)/lib/lib$(1).a)
+
+
+$(SANDBOX_AR):	$(ALL_OBJS)
+	@echo AR "     " $$@
+	@ar qcs $(SANDBOX_AR) $(ALL_OBJS)
+	@ln -sf $(abspath $(SANDBOX)/lib) $(2)/build/
+
+
+$(1): $(SANDBOX_AR)
+
+$(1)_clean:
+	@test -d $(2)/$(BUILD) && rm -r $(2)/$(BUILD); true
+	@test -e $(SANDBOX_AR) && rm $(SANDBOX_AR); true
+	@test -d $(SANDBOX)/lib && rmdir --ignore-fail-on-non-empty $(SANDBOX)/lib; true
+	@test -h $(2)/build/$1  && rm $(2)/build/$1; true
+	@test -h $(2)/build/lib && rm $(2)/build/lib; true
+	@test -d $(2)/build && rmdir --ignore-fail-on-non-empty $(2)/build; true
+
+endef
+
+
+
+# APPLICATION
+# $(1): project
+# $(2): directory
+define application_TEMPLATE
+	$(eval $(call create_object_rules,$(1),$(2)))
+	$(eval $(call create_dep_libs,$(1),$(2)))
+	$(eval SANDBOX_BIN := $(if $(APPLICATION_NAME), $(SANDBOX)/bin/$(APPLICATION_NAME), $(SANDBOX)/bin/$(1)))
+
+
+$(SANDBOX_BIN): $(ALL_OBJS) $(DEPENDENCIES) $(LOCAL_LIBS_ABSOLUTE)
+	@echo LD "     " $$@
+	@$(LD) $(LDFLAGS) -o $$@ -L$(SANDBOX)/lib $(EXTERNAL_LIBPATHS) -Wl,-rpath=../lib $(RPATHS) $(ALL_OBJS) -Wl,--start-group $(LOCAL_LIBS) $(EXTERNAL_LIBS) -Wl,--end-group
+	@ln -sf $(abspath $(SANDBOX_BIN)) $(2)/build/
+	@ln -sf $(abspath $(SANDBOX)/lib) $(2)/build/
+
+
+$(1): $(SANDBOX_BIN)
+
+$(1)_clean:
+	@test -d $(2)/$(BUILD)  && rm -r $(2)/$(BUILD); true
+	@test -e $(SANDBOX_BIN) && rm $(SANDBOX_BIN); true
+	@test -d $(SANDBOX)/bin && rmdir --ignore-fail-on-non-empty $(SANDBOX)/bin; true
+	@test -h $(2)/build/$1  && rm $(2)/build/$1; true
+	@test -h $(2)/build/$(APPLICATION_NAME) && rm $(2)/build/$(APPLICATION_NAME); true
+	@test -h $(2)/build/lib && rm $(2)/build/lib; true
+	@test -d $(2)/build && rmdir --ignore-fail-on-non-empty $(2)/build; true
+
+endef
+
+
+# TEST - (specialization of APPLICATION)
+# $(1): project
+# $(2): directory
+define test_TEMPLATE
+	$(eval $(call application_TEMPLATE,$(1),$(2)))
+	$(eval TESTCASE_SYMLINKS := $(addsuffix /build/$(1),$(TESTCASE)))
+
+
+$(TESTCASE_SYMLINKS):
+	@if ! [ -e `dirname $$@` ]; then   \
+		echo MKDIR "  " `dirname $$@`; \
+		mkdir `dirname $$@`;           \
+	fi; true
+	@echo SYMLINK "" $(SANDBOX_BIN) '-->' $$@
+	@ln -sf $(abspath $(SANDBOX_BIN)) $$@
+
+$(1)_clean_symlinks:
+	@for file in $(TESTCASE_SYMLINKS); do \
+		test -e $$$$file && (rm $$$$file; rmdir --ignore-fail-on-non-empty `dirname $$$$file`); \
+	done; true
+
+
+$(1): $(TESTCASE_SYMLINKS)
+
+$(1)_clean: $(1)_clean_symlinks
+
+endef
+
+
+# COLLECTION
+define collection_TEMPLATE
+$(1):
+	
+$(1)_clean:
+
+endef
+
+
+# HEADERS
+define headers_TEMPLATE
+$(1):
+	@test -d $(2)/$(BUILD) ||  mkdir -p $(2)/$(BUILD); true
+	
+$(1)_clean:
+	@test -d $(2)/$(BUILD) && rm -r $(2)/$(BUILD); true
+	@test -d $(2)/build && rmdir --ignore-fail-on-non-empty $(2)/build; true
+
+endef
+
+
+# INSTALL
+# $(1): project
+# $(2): directory
+define install_TEMPLATE
+	$(eval $(call create_install_rules,$(1),$(2)))
+
+$(1):
+	
+$(1)_clean:
+	@for file in $(realpath $(ALL_FILES) $(ALL_INSTALL_DIRS)); do \
+		test -f $$$$file && (rm $$$$file; rmdir --ignore-fail-on-non-empty `dirname $$$$file`); \
+		test -d $$$$file && rmdir --ignore-fail-on-non-empty $$$$file; \
+	done; true
+	@test -d $(SANDBOX)/$(INSTALL_DIR) && rmdir --ignore-fail-on-non-empty $(SANDBOX)/$(INSTALL_DIR); true
+
+endef
+

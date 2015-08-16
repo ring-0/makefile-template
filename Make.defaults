@@ -1,0 +1,66 @@
+# ------------ START - Project Defaults
+PROJECT_ID			:=
+PROJECT_TYPE		:=
+
+APPLICATION_NAME	:=
+LIBRARY_NAME		:=
+
+CXX_Q1_SOURCES		:= 
+CXX_Q2_SOURCES		:=
+CXX_Q3_SOURCES		:=
+
+LANGUAGE_STD		:= c++11
+
+DEPENDENCIES		:=
+TESTCASE			:= 
+
+EXTERNAL_LIBS		:=
+EXTERNAL_LIBPATHS	:=
+EXTERNAL_INCLUDES	:= 
+
+INSTALL_DIR			:=
+INSTALL_FILES		:=
+# ------------ END - Project Defaults
+
+ifdef compiler
+include Make.$(compiler)
+else
+# ------------ START - GCC defaults
+CXX 				:= g++
+CC					:= gcc
+
+CXX_Q3_FLAGS		:= -Werror 
+CXX_Q2_FLAGS		:= $(CXX_Q3_FLAGS) -Wall -Wformat -Wformat-y2k -Wformat-nonliteral -Winit-self -Wno-missing-include-dirs -Wunused -Wconversion -Wredundant-decls -Wnon-virtual-dtor -Woverloaded-virtual 
+CXX_Q1_FLAGS		:= $(CXX_Q2_FLAGS) -pedantic-errors -Wextra -Wswitch -Wswitch-default -Wswitch-enum -Weffc++
+
+STDFLAG				:= -std=
+DEPFLAGS			:= 
+CXXFLAGS			:= -pipe -march=native -pthread
+CXXFLAGS_DEBUG		:= -ggdb -O0 
+CXXFLAGS_RELEASE	:= -O3 -DNDEBUG
+CXX_INCLUDES		:= -I$(CURDIR)
+
+LD					:= g++
+LDFLAGS				:= -pthread -Wl,--add-needed -Wl,--no-undefined -rdynamic
+#LDFLAGS				:= -Wl,-Bdynamic -lc -lanl -Wl,-Bstatic -Wl,--add-needed -Wl,--no-undefined -rdynamic
+
+LD_RPATH			:= -Wl,-rpath-link=
+# ------------ END - GCC defaults
+endif
+
+# mode specific
+ifeq ($(MODE),debug)
+CXXFLAGS += $(CXXFLAGS_DEBUG)
+LDFLAGS  += $(CXXFLAGS_DEBUG)
+endif
+
+ifeq ($(MODE),profile)
+CXXFLAGS += $(CXXFLAGS_DEBUG) -pg
+LDFLAGS  += $(CXXFLAGS_DEBUG) -pg
+endif
+
+ifeq ($(MODE),release)
+CXXFLAGS += $(CXXFLAGS_RELEASE)
+LDFLAGS  += $(CXXFLAGS_RELEASE)
+endif
+

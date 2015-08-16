@@ -1,0 +1,35 @@
+MAKEFLAGS += -rR --no-print-directory
+TOPDIR := $(dir $(lastword $(MAKEFILE_LIST)))
+.SUFFIX:
+
+# sanity
+ifndef PROJECT_ID
+$(error No PROJECT_ID defined)
+endif
+
+
+PROJECT_DIR := $(subst -,/,$(PROJECT_ID))
+BUILD_TARGETS := $(PROJECT_ID)
+
+# collection
+ifeq ($(PROJECT_TYPE),collection)
+$(eval COLLECTION_LIST := $(addprefix $(PROJECT_DIR)/,$(shell find -mindepth 2 -name Makefile -printf "%h\n" | sed 's!^\./!!')))
+$(eval BUILD_TARGETS   := $(COLLECTION_LIST))
+endif
+
+# testcase
+ifeq ($(MAKECMDGOALS),testcase)
+$(eval TESTCASE_LIST := $(shell find $(TOPDIR) -name Makefile | xargs egrep -l 'TESTCASE.*$(PROJECT_DIR)' | xargs grep PROJECT_ID | cut -d= -f2))
+$(eval BUILD_TARGETS := $(PROJECT_ID) $(TESTCASE_LIST))
+endif
+
+# dir to project
+$(eval BUILD_TARGETS := $(subst /,-,$(BUILD_TARGETS)))
+
+# targets
+all collection tests:
+	$(MAKE) -C $(TOPDIR) $(BUILD_TARGETS)
+
+clean:
+	$(MAKE) -C $(TOPDIR) clean clean="$(BUILD_TARGETS)"
+	
